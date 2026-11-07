@@ -812,6 +812,115 @@ public class DataBinderTests {
 	}
 
 	@Test
+	public void testBindingWithMixedCaseDisallowedFieldsIsCaseInsensitive() throws BindException {
+		TestBean rod = new TestBean();
+		DataBinder binder = new DataBinder(rod);
+		binder.setDisallowedFields("aGe", "*OUChy", "SPOUSE.*");
+		MutablePropertyValues pvs = new MutablePropertyValues();
+		pvs.add("name", "Rod");
+		pvs.add("AGE", "32");
+		pvs.add("touchy", "Rod");
+		pvs.add("spouse.name", "Kerry");
+
+		binder.bind(pvs);
+		binder.close();
+
+		assertThat(rod.getName()).as("changed name correctly").isEqualTo("Rod");
+		assertThat(rod.getAge()).as("did not change age").isEqualTo(0);
+		assertThat(rod.getTouchy()).as("did not change touchy").isNull();
+		assertThat(rod.getSpouse()).as("did not create spouse").isNull();
+		assertThat(binder.getBindingResult().getSuppressedFields())
+				.containsExactlyInAnyOrder("AGE", "touchy", "spouse.name");
+	}
+
+	@Test
+	public void testIsAllowedMatchesDisallowedPatternsIgnoringCase() {
+		DataBinder binder = new DataBinder(new TestBean());
+		binder.setDisallowedFields("age", "*Colour", "some*Map[*]", "SPOUSE.*");
+
+		// direct equality
+		assertThat(binder.isAllowed("age")).isFalse();
+		assertThat(binder.isAllowed("AGE")).isFalse();
+		assertThat(binder.isAllowed("Age")).isFalse();
+		// "*xxx"
+		assertThat(binder.isAllowed("favouriteColour")).isFalse();
+		assertThat(binder.isAllowed("FAVOURITECOLOUR")).isFalse();
+		// "xxx*yyy*"
+		assertThat(binder.isAllowed("someMap[key]")).isFalse();
+		assertThat(binder.isAllowed("SOMEMAP[KEY]")).isFalse();
+		// "xxx*"
+		assertThat(binder.isAllowed("spouse.name")).isFalse();
+		assertThat(binder.isAllowed("Spouse.Name")).isFalse();
+		// not matching
+		assertThat(binder.isAllowed("name")).isTrue();
+		assertThat(binder.isAllowed("ages")).isTrue();
+		assertThat(binder.isAllowed("touchy")).isTrue();
+	}
+
+	@Test
+	public void testSetDisallowedFieldsStoresCanonicalPatternsWithoutLowercasing() {
+		DataBinder binder = new DataBinder(new TestBean());
+		binder.setDisallowedFields("Age", "SomeMap['KEY3']", "SPOUSE.*");
+
+		assertThat(binder.getDisallowedFields()).containsExactly("Age", "SomeMap[KEY3]", "SPOUSE.*");
+	}
+
+	@Test
+	public void testDisallowedFieldMatchingIsLocaleIndependent() {
+		Locale original = Locale.getDefault();
+		try {
+			Locale.setDefault(new Locale("tr"));
+			DataBinder binder = new DataBinder(new TestBean());
+			binder.setDisallowedFields("jedi", "someIntArray", "SPOUSE.*");
+
+			assertThat(binder.isAllowed("JEDI")).isFalse();
+			assertThat(binder.isAllowed("Jedi")).isFalse();
+			assertThat(binder.isAllowed("SOMEINTARRAY")).isFalse();
+			assertThat(binder.isAllowed("spouse.name")).isFalse();
+		}
+		finally {
+			Locale.setDefault(original);
+		}
+	}
+
+	@Test
+	public void testBindingWithDisallowedFieldsAndDotlessIFieldName() throws BindException {
+		// "ı" (dotless i) is left as-is by String#toLowerCase, but the bean property
+		// lookup capitalizes it to "I" and therefore resolves "ıSBN" to "ISBN".
+		Book book = new Book();
+		DataBinder binder = new DataBinder(book);
+		binder.setDisallowedFields("isbn");
+		MutablePropertyValues pvs = new MutablePropertyValues();
+		pvs.add("title", "Spring");
+		pvs.add("ıSBN", "1234567890");
+
+		binder.bind(pvs);
+		binder.close();
+
+		assertThat(book.getTitle()).as("changed title correctly").isEqualTo("Spring");
+		assertThat(book.getISBN()).as("did not change ISBN").isNull();
+		assertThat(binder.getBindingResult().getSuppressedFields()).containsExactly("ıSBN");
+	}
+
+	@Test
+	public void testBindingWithDisallowedFieldsAndDottedCapitalIFieldName() throws BindException {
+		// "İ" (capital I with dot above) is lower-cased by String#toLowerCase to
+		// "i̇", but the bean property lookup uncapitalizes it to "i" and therefore
+		// resolves "İd" to "id".
+		OptionalHolder holder = new OptionalHolder();
+		DataBinder binder = new DataBinder(holder);
+		binder.setDisallowedFields("id");
+		MutablePropertyValues pvs = new MutablePropertyValues();
+		pvs.add("İd", "admin");
+
+		binder.bind(pvs);
+		binder.close();
+
+		assertThat(holder.getId()).as("did not change id").isNull();
+		assertThat(binder.getBindingResult().getSuppressedFields()).containsExactly("İd");
+	}
+
+	@Test
 	public void testBindingWithAllowedFieldsUsingAsterisks() throws BindException {
 		TestBean rod = new TestBean();
 		DataBinder binder = new DataBinder(rod, "person");

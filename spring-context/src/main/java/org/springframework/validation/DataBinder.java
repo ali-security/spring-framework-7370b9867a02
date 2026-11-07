@@ -23,7 +23,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 import org.apache.commons.logging.Log;
@@ -445,6 +444,11 @@ public class DataBinder implements PropertyEditorRegistry, TypeConverter {
 	 * by malicious users when binding HTTP request parameters.
 	 * <p>Supports "xxx*", "*xxx" and "*xxx*" patterns. More sophisticated matching
 	 * can be implemented by overriding the {@code isAllowed} method.
+	 * <p>The default implementation of this method stores disallowed field patterns
+	 * in {@linkplain PropertyAccessorUtils#canonicalPropertyName(String) canonical}
+	 * form, and subsequently pattern matching in {@link #isAllowed} is case-insensitive.
+	 * Subclasses that override this method must therefore take this transformation
+	 * into account.
 	 * <p>Alternatively, specify a list of <i>allowed</i> fields.
 	 * @param disallowedFields array of field names
 	 * @see #setAllowedFields
@@ -457,8 +461,7 @@ public class DataBinder implements PropertyEditorRegistry, TypeConverter {
 		else {
 			String[] fieldPatterns = new String[disallowedFields.length];
 			for (int i = 0; i < fieldPatterns.length; i++) {
-				String field = PropertyAccessorUtils.canonicalPropertyName(disallowedFields[i]);
-				fieldPatterns[i] = field.toLowerCase(Locale.ROOT);
+				fieldPatterns[i] = PropertyAccessorUtils.canonicalPropertyName(disallowedFields[i]);
 			}
 			this.disallowedFields = fieldPatterns;
 		}
@@ -794,8 +797,92 @@ public class DataBinder implements PropertyEditorRegistry, TypeConverter {
 	protected boolean isAllowed(String field) {
 		String[] allowed = getAllowedFields();
 		String[] disallowed = getDisallowedFields();
-		return ((ObjectUtils.isEmpty(allowed) || PatternMatchUtils.simpleMatch(allowed, field)) &&
-				(ObjectUtils.isEmpty(disallowed) || !PatternMatchUtils.simpleMatch(disallowed, field.toLowerCase(Locale.ROOT))));
+		if (!ObjectUtils.isEmpty(allowed) && !PatternMatchUtils.simpleMatch(allowed, field)) {
+			return false;
+		}
+		if (!ObjectUtils.isEmpty(disallowed)) {
+			return !simpleMatchIgnoreCase(disallowed, field);
+		}
+		return true;
+	}
+
+	/**
+	 * Variant of {@link PatternMatchUtils#simpleMatch(String[], String)} that
+	 * ignores upper/lower case.
+	 * @param patterns the patterns to match against
+	 * @param str the String to match
+	 * @return whether the String matches any of the given patterns
+	 */
+	private static boolean simpleMatchIgnoreCase(@Nullable String[] patterns, @Nullable String str) {
+		if (patterns != null) {
+			for (String pattern : patterns) {
+				if (simpleMatchIgnoreCase(pattern, str)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Match a String against the given pattern, ignoring upper/lower case,
+	 * supporting the following simple pattern styles: "xxx*", "*xxx", "*xxx*"
+	 * and "xxx*yyy" matches (with an arbitrary number of pattern parts), as
+	 * well as direct equality.
+	 * <p>Variant of {@link PatternMatchUtils#simpleMatch(String, String)} that
+	 * performs every comparison with {@link String#equalsIgnoreCase} or
+	 * {@link String#regionMatches(boolean, int, String, int, int)} rather than
+	 * lower-casing the input.
+	 * @param pattern the pattern to match against
+	 * @param str the String to match
+	 * @return whether the String matches the given pattern
+	 */
+	private static boolean simpleMatchIgnoreCase(@Nullable String pattern, @Nullable String str) {
+		if (pattern == null || str == null) {
+			return false;
+		}
+
+		int firstIndex = pattern.indexOf('*');
+		if (firstIndex == -1) {
+			return pattern.equalsIgnoreCase(str);
+		}
+
+		if (firstIndex == 0) {
+			if (pattern.length() == 1) {
+				return true;
+			}
+			int nextIndex = pattern.indexOf('*', 1);
+			if (nextIndex == -1) {
+				String part = pattern.substring(1);
+				return (str.length() >= part.length() &&
+						str.regionMatches(true, str.length() - part.length(), part, 0, part.length()));
+			}
+			String part = pattern.substring(1, nextIndex);
+			if (part.isEmpty()) {
+				return simpleMatchIgnoreCase(pattern.substring(nextIndex), str);
+			}
+			int partIndex = indexOfIgnoreCase(str, part, 0);
+			while (partIndex != -1) {
+				if (simpleMatchIgnoreCase(pattern.substring(nextIndex), str.substring(partIndex + part.length()))) {
+					return true;
+				}
+				partIndex = indexOfIgnoreCase(str, part, partIndex + 1);
+			}
+			return false;
+		}
+
+		return (str.length() >= firstIndex &&
+				pattern.regionMatches(true, 0, str, 0, firstIndex) &&
+				simpleMatchIgnoreCase(pattern.substring(firstIndex), str.substring(firstIndex)));
+	}
+
+	private static int indexOfIgnoreCase(String str, String searchStr, int fromIndex) {
+		for (int i = fromIndex; i <= (str.length() - searchStr.length()); i++) {
+			if (str.regionMatches(true, i, searchStr, 0, searchStr.length())) {
+				return i;
+			}
+		}
+		return -1;
 	}
 
 	/**
