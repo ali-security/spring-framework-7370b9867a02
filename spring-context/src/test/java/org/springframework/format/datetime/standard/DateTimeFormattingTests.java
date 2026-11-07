@@ -420,6 +420,22 @@ public class DateTimeFormattingTests {
 	}
 
 	@Test
+	public void testBindMonthInAnyCaseWithTurkishDefaultLocale() {
+		Locale defaultLocale = Locale.getDefault();
+		Locale.setDefault(new Locale("tr", "TR"));
+		try {
+			MutablePropertyValues propertyValues = new MutablePropertyValues();
+			propertyValues.add("month", "April");
+			binder.bind(propertyValues);
+			assertThat(binder.getBindingResult().getErrorCount()).isEqualTo(0);
+			assertThat(binder.getBindingResult().getFieldValue("month").toString()).isEqualTo("APRIL");
+		}
+		finally {
+			Locale.setDefault(defaultLocale);
+		}
+	}
+
+	@Test
 	public void testBindYearMonth() {
 		MutablePropertyValues propertyValues = new MutablePropertyValues();
 		propertyValues.add("yearMonth", "2007-12");
